@@ -1,12 +1,13 @@
 package one.wabbit.ghostscript
 
-import kotlin.test.*
 import java.nio.file.Files
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class PdfOpsTests {
-
-    @BeforeTest
-    fun checkGs() = GsTestUtil.requireGhostscript()
+    @BeforeTest fun checkGs() = GsTestUtil.requireGhostscript()
 
     @Test
     fun testCountMergeExtract() {
@@ -36,13 +37,17 @@ class PdfOpsTests {
         val inPdf = GsTestUtil.makePdf(2, dir)
 
         val opt = dir.resolve("opt.pdf")
-        Gs.optimizePdf(inPdf, opt, Gs.OptimizeOptions(
-            detectDuplicateImages = true,
-            compressFonts = true,
-            compressStreams = true,
-            preserveAnnots = true,
-            jpegQFactor = 0.4
-        ))
+        Gs.optimizePdf(
+            inPdf,
+            opt,
+            Gs.OptimizeOptions(
+                detectDuplicateImages = true,
+                compressFonts = true,
+                compressStreams = true,
+                preserveAnnots = true,
+                jpegQFactor = 0.4,
+            ),
+        )
         GsTestUtil.assertNonEmpty(opt)
 
         val lin = dir.resolve("lin.pdf")

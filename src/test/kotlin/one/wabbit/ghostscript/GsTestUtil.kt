@@ -1,6 +1,5 @@
 package one.wabbit.ghostscript
 
-import kotlin.test.fail
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.nio.charset.StandardCharsets
@@ -12,18 +11,18 @@ import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.name
 import kotlin.math.min
+import kotlin.test.fail
 
 /**
  * Test utilities for Ghostscript integration tests.
  *
- * These tests expect Ghostscript to be installed and on PATH (or GS/GSC env set),
- * and will bail with an explicit failure if not found.
+ * These tests expect Ghostscript to be installed and on PATH (or GS/GSC env set), and will bail
+ * with an explicit failure if not found.
  *
- * Some features (docxwrite, pdfimage*, xpswrite, PDF/A/X defs) are optional.
- * For those, tests return early with a clear message instead of failing.
+ * Some features (docxwrite, pdfimage*, xpswrite, PDF/A/X defs) are optional. For those, tests
+ * return early with a clear message instead of failing.
  */
 object GsTestUtil {
-
     fun tmpDir(prefix: String = "gs-tests-"): Path =
         Files.createTempDirectory(prefix).apply { toFile().deleteOnExit() }
 
@@ -35,11 +34,12 @@ object GsTestUtil {
         }
     }
 
-    fun availableDevices(): Set<String> = try {
-        Ghostscript().availableDevicesBlocking().toSet()
-    } catch (e: Throwable) {
-        emptySet()
-    }
+    fun availableDevices(): Set<String> =
+        try {
+            Ghostscript().availableDevicesBlocking().toSet()
+        } catch (e: Throwable) {
+            emptySet()
+        }
 
     fun hasDevice(name: String): Boolean = availableDevices().contains(name)
 
@@ -56,16 +56,19 @@ object GsTestUtil {
                 appendLine("<< /PageSize [595 842] >> setpagedevice")
                 appendLine("/Helvetica findfont 18 scalefont setfont")
                 appendLine("72 770 moveto (Hello Page $n) show")
-                appendLine("0.0 setgray 100 100 moveto 300 0 rlineto 0 200 rlineto -300 0 rlineto closepath stroke")
+                appendLine(
+                    "0.0 setgray 100 100 moveto 300 0 rlineto 0 200 rlineto -300 0 rlineto closepath stroke"
+                )
                 appendLine("showpage")
             }
         }
 
-        val cmd = GsCommand()
-            .add(GsArg.Device.PdfWrite)
-            .add(GsArg.OutputFile(out.toString()))
-            .add(GsArg.Quiet, GsArg.Batch, GsArg.NoPause, GsArg.NoPrompt, GsArg.Safer)
-            .add(GsArg.PostScript(ps))
+        val cmd =
+            GsCommand()
+                .add(GsArg.Device.PdfWrite)
+                .add(GsArg.OutputFile(out.toString()))
+                .add(GsArg.Quiet, GsArg.Batch, GsArg.NoPause, GsArg.NoPrompt, GsArg.Safer)
+                .add(GsArg.PostScript(ps))
 
         Ghostscript().executeBlocking(cmd).requireSuccess()
         return out
@@ -80,11 +83,19 @@ object GsTestUtil {
     fun readText(path: Path): String = Files.readAllBytes(path).toString(StandardCharsets.UTF_8)
 
     /** Produce a small RGB JPEG on disk. */
-    fun makeJpeg(root: Path, name: String = "img.jpg", w: Int = 64, h: Int = 48, color: Color = Color(0x66CCFF)): Path {
+    fun makeJpeg(
+        root: Path,
+        name: String = "img.jpg",
+        w: Int = 64,
+        h: Int = 48,
+        color: Color = Color(0x66CCFF),
+    ): Path {
         val img = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
         val g = img.createGraphics()
-        g.color = color; g.fillRect(0, 0, w, h)
-        g.color = Color.BLACK; g.drawString("GS", 5, h / 2)
+        g.color = color
+        g.fillRect(0, 0, w, h)
+        g.color = Color.BLACK
+        g.drawString("GS", 5, h / 2)
         g.dispose()
         val out = root.resolve(name)
         ImageIO.write(img, "jpeg", out.toFile())
@@ -99,8 +110,8 @@ object GsTestUtil {
     }
 
     /** One-line GS banner to confirm which build we’re hitting. */
-    fun gsHeader(): String {
-        return try {
+    fun gsHeader(): String =
+        try {
             val p = ProcessBuilder(Ghostscript.discoverExecutable().toString(), "-h").start()
             val txt = p.inputStream.bufferedReader().use { it.readText() }
             p.waitFor()
@@ -108,7 +119,6 @@ object GsTestUtil {
         } catch (e: Throwable) {
             "Ghostscript header: <unavailable: ${e.message}>"
         }
-    }
 
     /** Pretty log of a Ghostscript ExecResult (redacted command). */
     fun logExecResult(tag: String, r: ExecResult) {
@@ -120,11 +130,15 @@ object GsTestUtil {
                 if (r.stdout.isNotBlank()) {
                     appendLine("-- stdout${if (r.stdoutTruncated) " (truncated)" else ""} --")
                     appendLine(r.stdout.take(1200))
-                } else appendLine("-- stdout: <empty>")
+                } else {
+                    appendLine("-- stdout: <empty>")
+                }
                 if (r.stderr.isNotBlank()) {
                     appendLine("-- stderr${if (r.stderrTruncated) " (truncated)" else ""} --")
                     appendLine(r.stderr.take(1200))
-                } else appendLine("-- stderr: <empty>")
+                } else {
+                    appendLine("-- stderr: <empty>")
+                }
                 appendLine("==============================================")
             }
         )
@@ -151,7 +165,7 @@ object GsTestUtil {
             return
         }
         val size = pdf.fileSize()
-        println("File: ${pdf} (${size} bytes)")
+        println("File: $pdf ($size bytes)")
         val pages = runCatching { Gs.countPages(pdf) }.getOrElse { -1 }
         println("Page count (pdfpagecount): $pages")
 
@@ -168,18 +182,22 @@ object GsTestUtil {
     /** Extract using multiple txtwrite modes; write files and return a map. */
     fun extractAllTextModes(pdf: Path, outDir: Path): Map<GsArg.TextFormatMode, String> {
         val out = linkedMapOf<GsArg.TextFormatMode, String>()
-        for (mode in listOf(
-            GsArg.TextFormatMode.Utf8Layout,
-            GsArg.TextFormatMode.XmlRaw,
-            GsArg.TextFormatMode.Ucs2Layout,
-            GsArg.TextFormatMode.InternalDebug
-        )) {
+        for (mode in
+            listOf(
+                GsArg.TextFormatMode.Utf8Layout,
+                GsArg.TextFormatMode.XmlRaw,
+                GsArg.TextFormatMode.Ucs2Layout,
+                GsArg.TextFormatMode.InternalDebug,
+            )) {
             val p = outDir.resolve("${pdf.name}.${mode.name}.txt")
             try {
                 Gs.extractText(pdf, p, mode)
-                val s = Files.readAllBytes(p).toString(
-                    if (mode == GsArg.TextFormatMode.Ucs2Layout) Charsets.UTF_16 else Charsets.UTF_8
-                )
+                val s =
+                    Files.readAllBytes(p)
+                        .toString(
+                            if (mode == GsArg.TextFormatMode.Ucs2Layout) Charsets.UTF_16
+                            else Charsets.UTF_8
+                        )
                 out[mode] = s
             } catch (e: Throwable) {
                 out[mode] = "<ERROR: ${e.message}>"
@@ -191,23 +209,25 @@ object GsTestUtil {
     /** Render a low-DPI PNG per page to prove pages exist visually. */
     fun rasterSmoke(pdf: Path, outDir: Path, dpi: Int = 96): List<Path> {
         val pattern = outDir.resolve("dbg-page-%03d.png").toString()
-        val r = runCatching {
-            Gs.renderToImages(
-                input = pdf,
-                outPattern = pattern,
-                opt = Gs.RasterOptions(
-                    device = GsArg.Device.Png16m,
-                    dpi = dpi,
-                    textAlphaBits = 4,
-                    graphicsAlphaBits = 4
-                )
-            )
-        }.onFailure { e ->
-            println("rasterSmoke failed: ${e.message}")
-        }
+        val r =
+            runCatching {
+                    Gs.renderToImages(
+                        input = pdf,
+                        outPattern = pattern,
+                        opt =
+                            Gs.RasterOptions(
+                                device = GsArg.Device.Png16m,
+                                dpi = dpi,
+                                textAlphaBits = 4,
+                                graphicsAlphaBits = 4,
+                            ),
+                    )
+                }
+                .onFailure { e -> println("rasterSmoke failed: ${e.message}") }
         if (r.isSuccess) {
             val pages = runCatching { Gs.countPages(pdf) }.getOrElse { 0 }
-            return (1..pages).map { outDir.resolve(String.format("dbg-page-%03d.png", it)) }
+            return (1..pages)
+                .map { outDir.resolve(String.format("dbg-page-%03d.png", it)) }
                 .filter { it.exists() }
         }
         return emptyList()

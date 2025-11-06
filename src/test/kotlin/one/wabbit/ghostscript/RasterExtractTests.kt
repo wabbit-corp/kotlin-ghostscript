@@ -1,12 +1,14 @@
 package one.wabbit.ghostscript
 
-import kotlin.test.*
 import java.nio.file.Files
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class RasterExtractTests {
-
-    @BeforeTest
-    fun checkGs() = GsTestUtil.requireGhostscript()
+    @BeforeTest fun checkGs() = GsTestUtil.requireGhostscript()
 
     @Test
     fun testRenderToImagesAndGuard() {
@@ -14,9 +16,10 @@ class RasterExtractTests {
         val two = GsTestUtil.makePdf(2, dir)
 
         // Guard: multi-page render must include %d
-        val err = assertFailsWith<IllegalArgumentException> {
-            Gs.renderToImages(two, dir.resolve("page.png").toString())
-        }
+        val err =
+            assertFailsWith<IllegalArgumentException> {
+                Gs.renderToImages(two, dir.resolve("page.png").toString())
+            }
         assertTrue(err.message!!.contains("%d"), "should complain about %d placeholder")
 
         val ok = Gs.renderToImages(two, dir.resolve("page-%03d.png").toString())

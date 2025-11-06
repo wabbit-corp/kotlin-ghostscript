@@ -1,12 +1,13 @@
 package one.wabbit.ghostscript
 
-import kotlin.test.*
 import java.nio.file.Files
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class WatermarkAndMetadataTests {
-
-    @BeforeTest
-    fun checkGs() = GsTestUtil.requireGhostscript()
+    @BeforeTest fun checkGs() = GsTestUtil.requireGhostscript()
 
     @Test
     fun testTextWatermarkAndExtraction() {
@@ -15,7 +16,9 @@ class WatermarkAndMetadataTests {
         val out = dir.resolve("wm.pdf")
 
         println("GS: ${GsTestUtil.gsHeader()}")
-        println("Devices (first 12): ${GsTestUtil.availableDevices().take(12).sorted().joinToString()}")
+        println(
+            "Devices (first 12): ${GsTestUtil.availableDevices().take(12).sorted().joinToString()}"
+        )
 
         // Baseline extraction on input
         val inTxt = dir.resolve("in.txt")
@@ -53,7 +56,7 @@ class WatermarkAndMetadataTests {
         println("Text AFTER watermarking (Utf8Layout):\n${s.take(400)}")
         assertTrue(
             s.contains("WMTEST") || s.contains("Δ"),
-            "Expected watermark text in extraction; got:\n${s.take(400)}"
+            "Expected watermark text in extraction; got:\n${s.take(400)}",
         )
     }
 
@@ -64,8 +67,13 @@ class WatermarkAndMetadataTests {
         val logo = GsTestUtil.makeJpeg(dir, "logo.jpg", 64, 64)
         val out = dir.resolve("wmimg.pdf")
         Gs.watermarkImageFlattened(
-            inPdf, out, logo, drawWidthPt = 36.0, drawHeightPt = 36.0,
-            rotationDeg = 0.0, anchor = Gs.Anchor.Absolute(36.0, 36.0)
+            inPdf,
+            out,
+            logo,
+            drawWidthPt = 36.0,
+            drawHeightPt = 36.0,
+            rotationDeg = 0.0,
+            anchor = Gs.Anchor.Absolute(36.0, 36.0),
         )
         GsTestUtil.assertNonEmpty(out)
     }
@@ -77,14 +85,23 @@ class WatermarkAndMetadataTests {
         val b = GsTestUtil.makePdf(1, dir, "b.pdf")
 
         val infoOut = dir.resolve("info.pdf")
-        Gs.setDocInfo(a, infoOut, Gs.DocInfo(
-            title = "My Fancy Title — ü",
-            author = "Author Æ",
-            subject = "Subject",
-            keywords = "k1, k2"
-        ), openWithOutlines = true, pageLayout = "SinglePage")
+        Gs.setDocInfo(
+            a,
+            infoOut,
+            Gs.DocInfo(
+                title = "My Fancy Title — ü",
+                author = "Author Æ",
+                subject = "Subject",
+                keywords = "k1, k2",
+            ),
+            openWithOutlines = true,
+            pageLayout = "SinglePage",
+        )
         val bytes = Files.readAllBytes(infoOut).toString(Charsets.ISO_8859_1)
-        assertTrue(bytes.contains("My Fancy Title") || bytes.contains("\uFEFF"), "DOCINFO should be present")
+        assertTrue(
+            bytes.contains("My Fancy Title") || bytes.contains("\uFEFF"),
+            "DOCINFO should be present",
+        )
 
         val merged = dir.resolve("merged-bm.pdf")
         Gs.mergeWithBookmarks(listOf(a, b), merged, titles = listOf("First", "Second"))
