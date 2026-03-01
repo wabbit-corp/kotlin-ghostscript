@@ -30,6 +30,8 @@ publishing {
 }
 
 dependencies {
+    implementation("one.wabbit:kotlin-exec:0.0.1")
+
     testImplementation(kotlin("test"))
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
