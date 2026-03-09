@@ -4,7 +4,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven("https://repo.papermc.io/repository/maven-public/")
+
     }
 }
 
@@ -12,7 +12,7 @@ pluginManagement {
     repositories {
         google()
         gradlePluginPortal()
-        maven("https://repo.papermc.io/repository/maven-public/")
+
     }
     plugins {
         id("org.jetbrains.kotlin.jvm") version "2.3.10"
@@ -32,8 +32,3 @@ pluginManagement {
         id("net.minecrell.plugin-yml.bukkit") version "0.6.0"
     }
 }
-
-include(":kotlin-exec")
-project(":kotlin-exec").projectDir = file("../kotlin-exec")
-include(":kotlin-throwable-policy")
-project(":kotlin-throwable-policy").projectDir = file("../kotlin-throwable-policy")
