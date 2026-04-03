@@ -6,12 +6,15 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.Locale
 import javax.imageio.ImageIO
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.io.files.Path as KxPath
+import one.wabbit.exec.Exec
+import one.wabbit.exec.ExecError
+import one.wabbit.exec.ExecException
+import one.wabbit.exec.ExecOutcome
+import one.wabbit.exec.ExecSpec
+import one.wabbit.exec.ExitPolicy
+import one.wabbit.exec.execBlockingOutcome
+import one.wabbit.exec.execOutcome
 
 /** ---------- Core ADT for arguments ---------- * */
 sealed interface GsArg {
@@ -663,7 +666,45 @@ class Ghostscript(
         cmd: GsCommand,
         workingDir: Path? = null,
         stdinBytes: ByteArray? = null,
-    ): ExecResult = runBlocking { execute(cmd, workingDir, stdinBytes) }
+    ): ExecResult {
+        val argv = mutableListOf(execPath.toString()) + cmd.assemble()
+        val redacted = redactArgv(argv)
+        val startNanos = System.nanoTime()
+        val commonWorkingDir = workingDir?.let { KxPath(it.toString()) }
+        val outcome =
+            Exec.execBlockingOutcome(
+                ExecSpec(
+                    argv = argv,
+                    cwd = commonWorkingDir,
+                    stdin = stdinBytes?.let { ExecSpec.Input.Bytes(it) } ?: ExecSpec.Input.None,
+                    stdout =
+                        ExecSpec.StdoutSpec.Pipe(
+                            ExecSpec.SinkSpec.Capture(
+                                maxBytes = config.maxOutputBytes,
+                                keep = ExecSpec.Keep.Head,
+                            )
+                        ),
+                    stderr =
+                        ExecSpec.StderrSpec.Pipe(
+                            ExecSpec.SinkSpec.Capture(
+                                maxBytes = config.maxOutputBytes,
+                                keep = ExecSpec.Keep.Head,
+                            )
+                        ),
+                    exitPolicy = ExitPolicy.Return,
+                    timeout = kotlin.time.Duration.parse("${config.timeoutMs}ms"),
+                )
+            )
+
+        return mapExecOutcome(
+            outcome = outcome,
+            argv = argv,
+            redacted = redacted,
+            workingDir = workingDir,
+            elapsedMs = elapsedMillis(startNanos),
+            timeoutMs = config.timeoutMs,
+        )
+    }
 
     /** Suspend API */
     suspend fun execute(
@@ -671,137 +712,199 @@ class Ghostscript(
         workingDir: Path? = null,
         stdinBytes: ByteArray? = null,
         timeoutMs: Long = config.timeoutMs,
+    ): ExecResult {
+        val argv = mutableListOf(execPath.toString()) + cmd.assemble()
+        val redacted = redactArgv(argv)
+        val startNanos = System.nanoTime()
+        val commonWorkingDir = workingDir?.let { KxPath(it.toString()) }
+        val outcome =
+            Exec.execOutcome(
+                ExecSpec(
+                    argv = argv,
+                    cwd = commonWorkingDir,
+                    stdin = stdinBytes?.let { ExecSpec.Input.Bytes(it) } ?: ExecSpec.Input.None,
+                    stdout =
+                        ExecSpec.StdoutSpec.Pipe(
+                            ExecSpec.SinkSpec.Capture(
+                                maxBytes = config.maxOutputBytes,
+                                keep = ExecSpec.Keep.Head,
+                            )
+                        ),
+                    stderr =
+                        ExecSpec.StderrSpec.Pipe(
+                            ExecSpec.SinkSpec.Capture(
+                                maxBytes = config.maxOutputBytes,
+                                keep = ExecSpec.Keep.Head,
+                            )
+                        ),
+                    exitPolicy = ExitPolicy.Return,
+                    timeout = kotlin.time.Duration.parse("${timeoutMs}ms"),
+                )
+            )
+
+        return mapExecOutcome(
+            outcome = outcome,
+            argv = argv,
+            redacted = redacted,
+            workingDir = workingDir,
+            elapsedMs = elapsedMillis(startNanos),
+            timeoutMs = timeoutMs,
+        )
+    }
+
+    /** Convenience: query available devices (`gs -h` lists them). */
+    fun availableDevicesBlocking(): List<String> {
+        val outcome =
+            Exec.execBlockingOutcome(
+                ExecSpec(
+                    argv = listOf(execPath.toString(), "-h"),
+                    stdout =
+                        ExecSpec.StdoutSpec.Pipe(
+                            ExecSpec.SinkSpec.Capture(
+                                maxBytes = maxOf(config.maxOutputBytes, 4 * 1024 * 1024),
+                                keep = ExecSpec.Keep.Head,
+                            )
+                        ),
+                    stderr = ExecSpec.StderrSpec.ToStdout,
+                    exitPolicy = ExitPolicy.Return,
+                )
+            )
+
+        return parseAvailableDevicesOutput(extractHelpOutput(outcome))
+    }
+
+    suspend fun availableDevices(): List<String> {
+        val outcome =
+            Exec.execOutcome(
+                ExecSpec(
+                    argv = listOf(execPath.toString(), "-h"),
+                    stdout =
+                        ExecSpec.StdoutSpec.Pipe(
+                            ExecSpec.SinkSpec.Capture(
+                                maxBytes = maxOf(config.maxOutputBytes, 4 * 1024 * 1024),
+                                keep = ExecSpec.Keep.Head,
+                            )
+                        ),
+                    stderr = ExecSpec.StderrSpec.ToStdout,
+                    exitPolicy = ExitPolicy.Return,
+                )
+            )
+
+        return parseAvailableDevicesOutput(extractHelpOutput(outcome))
+    }
+
+    private fun mapExecOutcome(
+        outcome: ExecOutcome,
+        argv: List<String>,
+        redacted: List<String>,
+        workingDir: Path?,
+        elapsedMs: Long,
+        timeoutMs: Long,
     ): ExecResult =
-        withContext(Dispatchers.IO) {
-            val argv = mutableListOf(execPath.toString()) + cmd.assemble()
-            val redacted = redactArgv(argv)
-
-            val pb = ProcessBuilder(argv)
-            if (workingDir != null) pb.directory(workingDir.toFile())
-            pb.redirectErrorStream(false)
-
-            val startNanos = System.nanoTime()
-            val proc =
-                try {
-                    pb.start()
-                } catch (e: java.io.IOException) {
-                    val durMs =
-                        java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
-                            System.nanoTime() - startNanos
-                        )
-                    throw IllegalStateException(
-                        "Failed to start Ghostscript at '$execPath'. ${e.message ?: e::class.java.name}\n" +
-                            "Command: ${redacted.joinToString(" ")}",
-                        e,
-                    )
-                }
-
-            val outDeferred = async { readStreamLimited(proc.inputStream, config.maxOutputBytes) }
-            val errDeferred = async { readStreamLimited(proc.errorStream, config.maxOutputBytes) }
-
-            if (stdinBytes != null) {
-                proc.outputStream.use { it.write(stdinBytes) }
-            } else {
-                proc.outputStream.close()
-            }
-
-            val exit: Int
-            val outRes: ReadResult
-            val errRes: ReadResult
-
-            try {
-                exit = withTimeout(timeoutMs) { proc.waitFor() }
-                outRes = outDeferred.await()
-                errRes = errDeferred.await()
-                val durMs =
-                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
-                        System.nanoTime() - startNanos
-                    )
-                return@withContext ExecResult(
+        when (outcome) {
+            is ExecOutcome.Success ->
+                ExecResult(
                     command = argv,
                     redactedCommand = redacted,
-                    exitCode = exit,
-                    stdout = outRes.text,
-                    stderr = errRes.text,
-                    stdoutTruncated = outRes.truncated,
-                    stderrTruncated = errRes.truncated,
-                    durationMs = durMs,
+                    exitCode = outcome.result.exitCode.value,
+                    stdout = outcome.result.stdout?.text() ?: "",
+                    stderr = outcome.result.stderr?.text() ?: "",
+                    stdoutTruncated = outcome.result.stdout?.truncated ?: false,
+                    stderrTruncated = outcome.result.stderr?.truncated ?: false,
+                    durationMs = outcome.result.duration.inWholeMilliseconds,
                     timedOut = false,
                     workingDirectory = workingDir?.toAbsolutePath(),
                 )
-            } catch (e: TimeoutCancellationException) {
-                // Hard kill; then make sure readers don't hang on streams after destroy.
-                proc.destroyForcibly()
-                outDeferred.cancel()
-                errDeferred.cancel()
-                runCatching { proc.inputStream.close() }
-                runCatching { proc.errorStream.close() }
 
-                val durMs =
-                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
-                        System.nanoTime() - startNanos
-                    )
-                return@withContext ExecResult(
-                    command = argv,
-                    redactedCommand = redacted,
-                    exitCode = 124, // conventional timeout
-                    stdout = "",
-                    stderr = "[ghostscript runner] timed out after ${timeoutMs}ms",
-                    stdoutTruncated = false,
-                    stderrTruncated = false,
-                    durationMs = durMs,
-                    timedOut = true,
-                    workingDirectory = workingDir?.toAbsolutePath(),
-                )
-            }
+            is ExecOutcome.Failure ->
+                when (val error = outcome.error) {
+                    is ExecError.TimedOut ->
+                        ExecResult(
+                            command = argv,
+                            redactedCommand = redacted,
+                            exitCode = 124,
+                            stdout = "",
+                            stderr = "[ghostscript runner] timed out after ${timeoutMs}ms",
+                            stdoutTruncated = false,
+                            stderrTruncated = false,
+                            durationMs = elapsedMs,
+                            timedOut = true,
+                            workingDirectory = workingDir?.toAbsolutePath(),
+                        )
+
+                    is ExecError.ConfigureFailed,
+                    is ExecError.SpawnFailed ->
+                        throw startFailure(error, redacted)
+
+                    else ->
+                        throw IllegalStateException(
+                            "Ghostscript runner failed during ${error.phase}: ${error.message}",
+                            error.cause ?: ExecException(error),
+                        )
+                }
         }
 
-    /** Convenience: query available devices (`gs -h` lists them). */
-    fun availableDevicesBlocking(): List<String> = runBlocking { availableDevices() }
-
-    suspend fun availableDevices(): List<String> =
-        withContext(Dispatchers.IO) {
-            val pb = ProcessBuilder(execPath.toString(), "-h")
-            pb.redirectErrorStream(true)
-            val proc =
-                try {
-                    pb.start()
-                } catch (e: java.io.IOException) {
+    private fun extractHelpOutput(outcome: ExecOutcome): String =
+        when (outcome) {
+            is ExecOutcome.Success -> {
+                val output = outcome.result.stdout?.text() ?: ""
+                if (outcome.result.exitCode.value != 0) {
                     throw IllegalStateException(
-                        "Failed to start Ghostscript at '$execPath' to query devices (-h). ${e.message ?: e::class.java.name}",
-                        e,
+                        "Ghostscript '-h' exited with ${outcome.result.exitCode.value}. Output (tail):\n${output.takeLast(2000)}"
                     )
                 }
-            val output = proc.inputStream.bufferedReader().use { it.readText() }
-            val code = proc.waitFor()
-            if (code != 0) {
-                throw IllegalStateException(
-                    "Ghostscript '-h' exited with $code. Output (tail):\n${output.takeLast(2000)}"
-                )
+                output
             }
 
-            val idx = output.indexOf("Available devices:")
-            if (idx < 0) {
-                throw IllegalStateException(
-                    "Could not locate 'Available devices:' section in 'gs -h' output. Full tail:\n${output.takeLast(4000)}"
-                )
-            }
+            is ExecOutcome.Failure ->
+                when (val error = outcome.error) {
+                    is ExecError.ConfigureFailed,
+                    is ExecError.SpawnFailed ->
+                        throw IllegalStateException(
+                            "Failed to start Ghostscript at '$execPath' to query devices (-h). ${error.message}",
+                            error.cause ?: ExecException(error),
+                        )
 
-            val section = output.substring(idx).substringAfter('\n')
-            val devices = mutableListOf<String>()
-            for (line in section.lineSequence()) {
-                val t = line.trim()
-                if (t.isEmpty()) break
-                if (t.startsWith("Search path:") || t.startsWith("For more information")) break
-                t.split(Regex("\\s+")).filter { it.isNotBlank() }.forEach(devices::add)
-            }
-            if (devices.isEmpty()) {
-                throw IllegalStateException(
-                    "Parsed 'gs -h' but found no devices. Output tail:\n${output.takeLast(2000)}"
-                )
-            }
-            devices
+                    else ->
+                        throw IllegalStateException(
+                            "Ghostscript '-h' failed during ${error.phase}: ${error.message}",
+                            error.cause ?: ExecException(error),
+                        )
+                }
         }
+
+    private fun parseAvailableDevicesOutput(output: String): List<String> {
+        val idx = output.indexOf("Available devices:")
+        if (idx < 0) {
+            throw IllegalStateException(
+                "Could not locate 'Available devices:' section in 'gs -h' output. Full tail:\n${output.takeLast(4000)}"
+            )
+        }
+
+        val section = output.substring(idx).substringAfter('\n')
+        val devices = mutableListOf<String>()
+        for (line in section.lineSequence()) {
+            val t = line.trim()
+            if (t.isEmpty()) break
+            if (t.startsWith("Search path:") || t.startsWith("For more information")) break
+            t.split(Regex("\\s+")).filter { it.isNotBlank() }.forEach(devices::add)
+        }
+        if (devices.isEmpty()) {
+            throw IllegalStateException(
+                "Parsed 'gs -h' but found no devices. Output tail:\n${output.takeLast(2000)}"
+            )
+        }
+        return devices
+    }
+
+    private fun startFailure(error: ExecError, redacted: List<String>): IllegalStateException =
+        IllegalStateException(
+            "Failed to start Ghostscript at '$execPath'. ${error.message}\nCommand: ${redacted.joinToString(" ")}",
+            error.cause ?: ExecException(error),
+        )
+
+    private fun elapsedMillis(startNanos: Long): Long =
+        java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos)
 }
 
 // -------------------------------------
